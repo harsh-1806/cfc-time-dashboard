@@ -1,2 +1,28 @@
-firebase-adminsdk.json
+# Python
+__pycache__/
+*.py[cod]
+*.egg
+*.egg-info/
+dist/
+build/
 .env
+*.env
+
+# Jupyter
+.ipynb_checkpoints
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Firebase credentials (IMPORTANT!)
+firebase-adminsdk.json
+
+# System
+.DS_Store
+Thumbs.db
+
+# VSCode
+.vscode/
+
+# OS
+*.log
