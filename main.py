@@ -1,73 +1,102 @@
 import streamlit as st
-import pandas as pd
-import matplotlib.pyplot as plt
+from datetime import datetime
+import uuid
 
-st.set_page_config(page_title="CFC Time Study Dashboard", layout="wide")
-st.title("📦 CFC Time Study Dashboard")
+# --- SESSION STATE SETUP ---
+if "batches" not in st.session_state:
+    st.session_state.batches = []
 
-# Input default time values
-default_time_3 = {"Small": 2, "Medium": 3, "Large": 4}
-default_time_2 = {"Small": 3, "Medium": 4, "Large": 5}
+if "tasks" not in st.session_state:
+    st.session_state.tasks = []
 
-with st.sidebar:
-    st.header("🔧 Time Configurations")
-    st.markdown("**Time taken per CFC (in minutes)**")
-    time_3_small = st.number_input("3 People - Small", value=default_time_3["Small"])
-    time_3_medium = st.number_input("3 People - Medium", value=default_time_3["Medium"])
-    time_3_large = st.number_input("3 People - Large", value=default_time_3["Large"])
+# --- HEADER ---
+st.title("🚚 Vehicle Loading/Unloading Task Manager")
 
-    time_2_small = st.number_input("2 People - Small", value=default_time_2["Small"])
-    time_2_medium = st.number_input("2 People - Medium", value=default_time_2["Medium"])
-    time_2_large = st.number_input("2 People - Large", value=default_time_2["Large"])
+# --- TAB SELECTION ---
+tab1, tab2, tab3 = st.tabs(["1️⃣ Setup Batches", "2️⃣ Assign Task", "3️⃣ Ongoing Tasks"])
 
-# Upload Excel file
-df = None
-st.subheader("📋 Upload SKU Data Sheet (.xlsx)")
-uploaded_file = st.file_uploader("Upload Excel file with columns: SKU, CFC per pallete, CFC Size", type="xlsx")
+# --- TAB 1: SETUP BATCHES ---
+with tab1:
+    st.header("Create Labor Batches (3 people each)")
+    with st.form("batch_form"):
+        name1 = st.text_input("Laborer 1")
+        name2 = st.text_input("Laborer 2")
+        name3 = st.text_input("Laborer 3")
+        submitted = st.form_submit_button("➕ Add Batch")
 
-if uploaded_file:
-    df = pd.read_excel(uploaded_file)
+        if submitted and name1 and name2 and name3:
+            batch_id = str(uuid.uuid4())
+            st.session_state.batches.append({
+                "id": batch_id,
+                "members": [name1, name2, name3],
+                "status": "available"
+            })
+            st.success(f"Batch added: {name1}, {name2}, {name3}")
 
-if df is not None:
-    # Use existing CFC Size column for categorization
-    df = df.dropna(subset=["CFC Size"])
-    df["CFC Size"] = df["CFC Size"].str.strip().str.capitalize()
+    if st.session_state.batches:
+        st.subheader("Current Batches")
+        for idx, batch in enumerate(st.session_state.batches):
+            members = ", ".join(batch["members"])
+            st.write(f"**Batch {idx + 1}** - {members} - Status: `{batch['status']}`")
 
-    category_counts = df["CFC Size"].value_counts()
-    total_skus = len(df)
-    percentages = (category_counts / total_skus * 100).round(2)
+# --- TAB 2: ASSIGN TASK ---
+with tab2:
+    st.header("Assign Task to Next Available Batch")
 
-    # Compute time
-    total_time_3 = (
-        (df["CFC Size"] == "Small").sum() * time_3_small +
-        (df["CFC Size"] == "Medium").sum() * time_3_medium +
-        (df["CFC Size"] == "Large").sum() * time_3_large
-    )
-    total_time_2 = (
-        (df["CFC Size"] == "Small").sum() * time_2_small +
-        (df["CFC Size"] == "Medium").sum() * time_2_medium +
-        (df["CFC Size"] == "Large").sum() * time_2_large
-    )
-    delta_time = total_time_2 - total_time_3
+    if not any(batch["status"] == "available" for batch in st.session_state.batches):
+        st.warning("⚠️ No available batches. Please add more or mark tasks complete.")
+    else:
+        with st.form("assign_task"):
+            vehicle_id = st.text_input("Vehicle ID")
+            vehicle_type = st.selectbox("Vehicle Type", ["Small", "Medium", "Large"])
+            task_type = st.selectbox("Task Type", ["Loading", "Unloading"])
+            docks = st.multiselect("Select Docks (2–17)", list(range(2, 18)))
+            assign_btn = st.form_submit_button("✅ Assign Task")
 
-    st.subheader("📊 SKU Categorization Summary")
-    st.dataframe(df, use_container_width=True)
+            if assign_btn and vehicle_id and docks:
+                # Get the first available batch
+                for batch in st.session_state.batches:
+                    if batch["status"] == "available":
+                        batch["status"] = "busy"
+                        task_id = str(uuid.uuid4())
+                        st.session_state.tasks.append({
+                            "id": task_id,
+                            "vehicle_id": vehicle_id,
+                            "vehicle_type": vehicle_type,
+                            "task_type": task_type,
+                            "docks": docks,
+                            "batch_id": batch["id"],
+                            "status": "active",
+                            "start_time": datetime.now().strftime("%H:%M:%S")
+                        })
+                        members = ", ".join(batch["members"])
+                        st.success(f"Task assigned to Batch: {members}")
+                        break
 
-    st.subheader("🔍 Category Breakdown")
-    st.write(f"**Total SKUs**: {total_skus}")
-    for cat in ["Small", "Medium", "Large"]:
-        st.write(f"**{cat}**: {category_counts.get(cat, 0)} SKUs ({percentages.get(cat, 0.0)}%)")
+# --- TAB 3: ONGOING TASKS ---
+with tab3:
+    st.header("Ongoing Tasks")
 
-    st.subheader("⏱️ Time Study Summary")
-    st.metric("Total Time (3 People)", f"{total_time_3} min")
-    st.metric("Total Time (2 People)", f"{total_time_2} min")
-    st.metric("Time Delta (2 - 3 People)", f"{delta_time} min")
+    if not st.session_state.tasks:
+        st.info("No active tasks currently.")
+    else:
+        to_remove = []
+        for task in st.session_state.tasks:
+            batch = next(b for b in st.session_state.batches if b["id"] == task["batch_id"])
+            batch_members = ", ".join(batch["members"])
+            cols = st.columns([2, 2, 2, 2, 1])
+            with cols[0]:
+                st.write(f"**Vehicle:** {task['vehicle_id']}")
+            with cols[1]:
+                st.write(f"**Docks:** {', '.join(map(str, task['docks']))}")
+            with cols[2]:
+                st.write(f"**Batch:** {batch_members}")
+            with cols[3]:
+                st.write(f"**Task:** {task['task_type']} ({task['vehicle_type']})")
+            with cols[4]:
+                if st.button("✅ Complete", key=task["id"]):
+                    to_remove.append(task["id"])
+                    batch["status"] = "available"
 
-    # Optional: Display chart
-    fig, ax = plt.subplots()
-    category_counts.plot(kind='bar', color=["green", "orange", "red"], ax=ax)
-    ax.set_ylabel("Number of SKUs")
-    ax.set_title("SKU Category Distribution")
-    st.pyplot(fig)
-else:
-    st.info("Please upload a valid Excel file to proceed.")
+        # Remove completed tasks
+        st.session_state.tasks = [t for t in st.session_state.tasks if t["id"] not in to_remove]
