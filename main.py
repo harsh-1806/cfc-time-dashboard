@@ -1,6 +1,8 @@
 import streamlit as st
 from datetime import datetime
 import uuid
+import pandas as pd
+import io
 
 # --- SESSION STATE SETUP ---
 if "batches" not in st.session_state:
@@ -8,6 +10,10 @@ if "batches" not in st.session_state:
 
 if "tasks" not in st.session_state:
     st.session_state.tasks = []
+
+if "batch_members" not in st.session_state:
+    st.session_state.batch_members = [""]  # Start with one input field
+
 
 # --- HEADER ---
 st.title("🚚 Vehicle Loading/Unloading Task Manager")
@@ -17,27 +23,46 @@ tab1, tab2, tab3 = st.tabs(["1️⃣ Setup Batches", "2️⃣ Assign Task", "3�
 
 # --- TAB 1: SETUP BATCHES ---
 with tab1:
-    st.header("Create Labor Batches (3 people each)")
-    with st.form("batch_form"):
-        name1 = st.text_input("Laborer 1")
-        name2 = st.text_input("Laborer 2")
-        name3 = st.text_input("Laborer 3")
-        submitted = st.form_submit_button("➕ Add Batch")
+    st.header("Create Labor Batches (Flexible size)")
 
-        if submitted and name1 and name2 and name3:
-            batch_id = str(uuid.uuid4())
-            st.session_state.batches.append({
-                "id": batch_id,
-                "members": [name1, name2, name3],
-                "status": "available"
-            })
-            st.success(f"Batch added: {name1}, {name2}, {name3}")
+    with st.form("batch_form"):
+        st.subheader("Enter Laborer Names")
+
+        # Display all current input fields
+        new_members = []
+        for i, name in enumerate(st.session_state.batch_members):
+            new_name = st.text_input(f"Laborer {i + 1}", value=name, key=f"member_{i}")
+            new_members.append(new_name)
+
+        # Store back the updated names
+        st.session_state.batch_members = new_members
+
+        # Add new input field on button click
+        if st.form_submit_button("➕ Add More"):
+            st.session_state.batch_members.append("")
+
+        # Submit the batch
+        submitted = st.form_submit_button("✅ Add Batch")
+        if submitted:
+            valid_names = [name.strip() for name in st.session_state.batch_members if name.strip()]
+            if len(valid_names) >= 1:
+                batch_id = str(uuid.uuid4())
+                st.session_state.batches.append({
+                    "id": batch_id,
+                    "members": valid_names,
+                    "status": "available"
+                })
+                st.success(f"Batch added: {', '.join(valid_names)}")
+                st.session_state.batch_members = [""]  # Reset form
+            else:
+                st.error("Please enter at least one name.")
 
     if st.session_state.batches:
         st.subheader("Current Batches")
         for idx, batch in enumerate(st.session_state.batches):
             members = ", ".join(batch["members"])
             st.write(f"**Batch {idx + 1}** - {members} - Status: `{batch['status']}`")
+
 
 # --- TAB 2: ASSIGN TASK ---
 with tab2:
@@ -100,3 +125,39 @@ with tab3:
 
         # Remove completed tasks
         st.session_state.tasks = [t for t in st.session_state.tasks if t["id"] not in to_remove]
+
+        # --- Export to Excel ---
+        import pandas as pd
+        import io
+
+        st.subheader("📤 Export Tasks to Excel")
+
+        # Convert tasks to DataFrame
+        export_data = []
+        for task in st.session_state.tasks:
+            batch = next(b for b in st.session_state.batches if b["id"] == task["batch_id"])
+            export_data.append({
+                "Vehicle ID": task["vehicle_id"],
+                "Vehicle Type": task["vehicle_type"],
+                "Task Type": task["task_type"],
+                "Docks": ", ".join(map(str, task["docks"])),
+                "Batch Members": ", ".join(batch["members"]),
+                "Task Status": task["status"],
+                "Start Time": task["start_time"]
+            })
+
+        df = pd.DataFrame(export_data)
+
+        # Convert to Excel in memory
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            df.to_excel(writer, index=False, sheet_name='OngoingTasks')
+
+        # Download button
+        st.download_button(
+            label="📥 Download Excel",
+            data=output.getvalue(),
+            file_name="ongoing_tasks.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
